@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "photo-organizer"
+version = "0.1.0"
+description = "Sort a directory of photos into numbered subdirectories by creation date."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "jackfaarmer", email = "jackfarmer109@gmail.com" }]
+keywords = ["photos", "organize", "files"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "ruff>=0.4"]
+
+[project.scripts]
+photo-organizer = "photo_organizer.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["photo_organizer*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
