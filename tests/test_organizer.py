@@ -128,8 +128,27 @@ def test_recursive_dedupes_colliding_basenames(tmp_path):
     directory = dest / "Directory_1"
     # Both files survive as two distinct files; nothing is clobbered.
     assert sorted(os.listdir(directory)) == ["IMG_0001.jpg", "IMG_0001_1.jpg"]
-    contents = {(directory / name).read_text() for name in os.listdir(directory)}
-    assert contents == {"from 100APPLE", "from 101APPLE"}
+    # Ordering is deterministic: the earlier-ctime file keeps the bare name, the
+    # later one gets the numeric suffix.
+    assert (directory / "IMG_0001.jpg").read_text() == "from 100APPLE"
+    assert (directory / "IMG_0001_1.jpg").read_text() == "from 101APPLE"
+
+
+def test_recursive_skips_nested_mac_junk(tmp_path):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    (source / "100APPLE").mkdir(parents=True)
+    _make_files(source / "100APPLE", 3)
+    # macOS artifacts nested inside a subfolder must be left behind.
+    (source / "100APPLE" / ".DS_Store").write_text("finder metadata")
+    (source / "100APPLE" / "._sidecar.jpg").write_text("appledouble sidecar")
+
+    moved = organize_photos(str(source), str(dest), platform="mac", recursive=True)
+
+    assert moved == 3
+    assert len(os.listdir(dest / "Directory_1")) == 3
+    assert (source / "100APPLE" / ".DS_Store").exists()
+    assert (source / "100APPLE" / "._sidecar.jpg").exists()
 
 
 def test_recursive_collects_files_at_arbitrary_depth(tmp_path):
@@ -157,6 +176,14 @@ def test_unique_dest_path_suffixes_on_collision(tmp_path):
     (tmp_path / "IMG_0001.jpg").write_text("existing")
     assert organizer._unique_dest_path(str(tmp_path), "IMG_0001.jpg") == str(
         tmp_path / "IMG_0001_1.jpg"
+    )
+
+
+def test_unique_dest_path_increments_past_first_suffix(tmp_path):
+    (tmp_path / "IMG_0001.jpg").write_text("a")
+    (tmp_path / "IMG_0001_1.jpg").write_text("b")
+    assert organizer._unique_dest_path(str(tmp_path), "IMG_0001.jpg") == str(
+        tmp_path / "IMG_0001_2.jpg"
     )
 
 

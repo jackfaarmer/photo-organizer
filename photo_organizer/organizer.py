@@ -55,30 +55,22 @@ def _collect_files(source_dir, platform, recursive):
     collects files at any depth. In both cases macOS junk files are skipped
     when ``platform == MAC``.
     """
-    collected = []
     if recursive:
-        for dirpath, _dirnames, filenames in os.walk(source_dir):
-            for filename in filenames:
-                source_path = os.path.join(dirpath, filename)
-                # Skip non-files (e.g. broken symlinks, FIFOs) so ``_creation_time``
-                # never stats something that raises, mirroring the flat branch.
-                if not os.path.isfile(source_path):
-                    continue
-                # On macOS, leave Finder/AppleDouble artifacts where they are.
-                if platform == MAC and _is_mac_junk(filename):
-                    continue
-                creation_time = _creation_time(source_path, platform)
-                collected.append((source_path, creation_time))
+        entries = ((dp, fn) for dp, _dirs, fns in os.walk(source_dir) for fn in fns)
     else:
-        for filename in os.listdir(source_dir):
-            source_path = os.path.join(source_dir, filename)
-            if not os.path.isfile(source_path):
-                continue
-            # On macOS, leave Finder/AppleDouble artifacts where they are.
-            if platform == MAC and _is_mac_junk(filename):
-                continue
-            creation_time = _creation_time(source_path, platform)
-            collected.append((source_path, creation_time))
+        entries = ((source_dir, fn) for fn in os.listdir(source_dir))
+
+    collected = []
+    for dirpath, filename in entries:
+        source_path = os.path.join(dirpath, filename)
+        # Skip non-files (e.g. broken symlinks, FIFOs) so ``_creation_time``
+        # never stats something that raises.
+        if not os.path.isfile(source_path):
+            continue
+        # On macOS, leave Finder/AppleDouble artifacts where they are.
+        if platform == MAC and _is_mac_junk(filename):
+            continue
+        collected.append((source_path, _creation_time(source_path, platform)))
     return collected
 
 
@@ -133,6 +125,11 @@ def organize_photos(source_dir, dest_dir, items_per_directory=1000, platform=Non
         raise ValueError("items_per_directory must be at least 1")
 
     platform = _normalize_platform(platform)
+
+    # Fail consistently for a bad source in both modes: os.walk would otherwise
+    # silently yield nothing, making --recursive "succeed" on a missing path.
+    if not os.path.isdir(source_dir):
+        raise NotADirectoryError(f"source is not a directory: {source_dir!r}")
 
     # Create destination directory if it doesn't exist
     Path(dest_dir).mkdir(parents=True, exist_ok=True)
