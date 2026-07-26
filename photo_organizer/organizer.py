@@ -93,10 +93,12 @@ def _unique_dest_path(directory, filename):
         counter += 1
 
 
-def organize_photos(source_dir, dest_dir, items_per_directory=1000, platform=None, recursive=False):
-    """Move files from ``source_dir`` into ``dest_dir`` split across numbered
-    subdirectories (``Directory_1``, ``Directory_2``, ...), ordered by each
-    file's creation time.
+def organize_photos(
+    source_dir, dest_dir, items_per_directory=1000, platform=None, recursive=False, copy=False
+):
+    """Move (or copy) files from ``source_dir`` into ``dest_dir`` split across
+    numbered subdirectories (``Directory_1``, ``Directory_2``, ...), ordered by
+    each file's creation time.
 
     Args:
         source_dir: Directory to read files from (non-recursive by default; set
@@ -113,9 +115,13 @@ def organize_photos(source_dir, dest_dir, items_per_directory=1000, platform=Non
             can share a basename, any collision in a destination subdirectory is
             resolved by appending a numeric suffix (``IMG_0001.HEIC`` ->
             ``IMG_0001_1.HEIC``) so nothing is clobbered.
+        copy: When True, copy each file (``shutil.copy2``, preserving timestamps
+            and metadata) and leave the originals in place. When False (default)
+            each file is moved (``shutil.move``), which deletes it from the
+            source. Use ``copy=True`` for non-destructive imports.
 
     Returns:
-        The number of files moved.
+        The number of files moved (or copied).
 
     Raises:
         ValueError: If ``items_per_directory`` is less than 1, or ``platform``
@@ -140,6 +146,11 @@ def organize_photos(source_dir, dest_dir, items_per_directory=1000, platform=Non
     # Sort files by creation date
     files_sorted_by_date.sort(key=lambda x: x[1])
 
+    # Choose the transfer once: copy2 preserves the originals (and their
+    # timestamps/metadata); move deletes each source after placing it.
+    transfer = shutil.copy2 if copy else shutil.move
+    verb = "Copied" if copy else "Moved"
+
     directory_count = 0
     file_count = 0
     current_sub_dir = None
@@ -156,8 +167,8 @@ def organize_photos(source_dir, dest_dir, items_per_directory=1000, platform=Non
         # Different sub-directories may hold files with the same basename;
         # give collisions a numeric suffix so nothing is overwritten.
         dest_path = _unique_dest_path(current_sub_dir, filename)
-        shutil.move(source_path, dest_path)
-        print(f"Moved {os.path.basename(dest_path)} to {current_sub_dir}")
+        transfer(source_path, dest_path)
+        print(f"{verb} {os.path.basename(dest_path)} to {current_sub_dir}")
 
         file_count += 1
 

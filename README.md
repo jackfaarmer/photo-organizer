@@ -15,13 +15,13 @@ python -m pip install -e .
 As a command (after installing):
 
 ```bash
-photo-organizer <source_dir> <dest_dir> [items_per_directory] [--platform mac|pc] [--recursive]
+photo-organizer <source_dir> <dest_dir> [items_per_directory] [--platform mac|pc] [--recursive] [--copy]
 ```
 
 As a module:
 
 ```bash
-python -m photo_organizer <source_dir> <dest_dir> [items_per_directory] [--platform mac|pc] [--recursive]
+python -m photo_organizer <source_dir> <dest_dir> [items_per_directory] [--platform mac|pc] [--recursive] [--copy]
 ```
 
 From Python:
@@ -35,6 +35,7 @@ organize_photos(
     items_per_directory=1000,
     platform="pc",  # or "mac"; omit to auto-detect the host OS.
     recursive=False,  # set True to descend into sub-directories.
+    copy=False,  # set True to copy (preserve originals) instead of moving.
 )
 ```
 
@@ -68,8 +69,24 @@ sub-folders can share a basename, any collision in a destination subdirectory
 is resolved by appending a numeric suffix (`IMG_0001.HEIC` →
 `IMG_0001_1.HEIC`) so nothing is clobbered.
 
-> **Note:** files are **moved**, not copied. Run against a backup first if
-> you are unsure.
+### Copy mode (`--copy`)
+
+By default files are **moved** (`shutil.move`), which deletes each one from the
+source once it lands in the destination. Pass `--copy` (or `copy=True`) to
+**copy** files instead (`shutil.copy2`, preserving timestamps and metadata),
+leaving every original in place. This is the safe choice for importing an
+irreplaceable library — a wrong path or an interrupted run can't lose photos.
+
+Because the originals stay put, copy mode is **not** idempotent: re-running
+`--copy` into the same destination re-copies every source file, and the
+collision handling gives the second batch numeric suffixes (`IMG_0001_1.HEIC`,
+…) rather than skipping duplicates. Point each import at a fresh destination.
+Note also that `copy2` follows symlinks (copying the target's contents),
+whereas move relocates the link itself.
+
+> **Warning:** the default **move** mode is destructive — it removes files from
+> the source. Use `--copy` for a non-destructive import, or run against a
+> backup first if you are unsure.
 
 ## Development
 

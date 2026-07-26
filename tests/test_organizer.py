@@ -33,6 +33,38 @@ def test_moves_all_files_into_single_directory(tmp_path):
     assert os.listdir(source) == []
 
 
+def test_copy_mode_preserves_source_files(tmp_path):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    source.mkdir()
+    originals = _make_files(source, 5)
+
+    copied = organize_photos(str(source), str(dest), items_per_directory=1000, copy=True)
+
+    assert copied == 5
+    assert len(os.listdir(dest / "Directory_1")) == 5
+    # copy=True leaves every source file in place, untouched.
+    assert sorted(os.listdir(source)) == sorted(p.name for p in originals)
+    # The copies are faithful: source and destination bytes match.
+    for original in originals:
+        copied_file = dest / "Directory_1" / original.name
+        assert copied_file.read_text() == original.read_text()
+
+
+def test_copy_mode_retains_timestamps(tmp_path):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    source.mkdir()
+    (path,) = _make_files(source, 1)
+    expected_mtime = os.stat(path).st_mtime
+
+    organize_photos(str(source), str(dest), items_per_directory=1000, copy=True)
+
+    copied = dest / "Directory_1" / path.name
+    # copy2 preserves the original modification time.
+    assert os.stat(copied).st_mtime == expected_mtime
+
+
 def test_splits_across_directories(tmp_path):
     source = tmp_path / "src"
     dest = tmp_path / "dst"

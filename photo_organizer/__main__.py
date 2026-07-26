@@ -42,21 +42,32 @@ def main(argv=None):
             "depth (default: read only the top level)."
         ),
     )
+    parser.add_argument(
+        "--copy",
+        action="store_true",
+        help=(
+            "Copy files (preserving the originals) instead of moving them. "
+            "The default is to MOVE, which deletes each file from the source; "
+            "use --copy for a non-destructive import."
+        ),
+    )
     args = parser.parse_args(argv)
 
     try:
-        moved = organize_photos(
+        count = organize_photos(
             args.source_dir,
             args.dest_dir,
             args.items_per_directory,
             platform=args.platform,
             recursive=args.recursive,
+            copy=args.copy,
         )
     except (ValueError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    print(f"Done. Moved {moved} file(s).")
+    verb = "Copied" if args.copy else "Moved"
+    print(f"Done. {verb} {count} file(s).")
     return 0
 
 
