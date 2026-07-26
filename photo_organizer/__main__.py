@@ -33,12 +33,17 @@ def main(argv=None):
     )
     args = parser.parse_args(argv)
 
-    moved = organize_photos(
-        args.source_dir,
-        args.dest_dir,
-        args.items_per_directory,
-        platform=args.platform,
-    )
+    try:
+        moved = organize_photos(
+            args.source_dir,
+            args.dest_dir,
+            args.items_per_directory,
+            platform=args.platform,
+        )
+    except (ValueError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
     print(f"Done. Moved {moved} file(s).")
     return 0
 

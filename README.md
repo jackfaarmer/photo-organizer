@@ -54,7 +54,8 @@ filesystem it is running on:
   organized as photos.
 
 When `--platform` is omitted, the host OS is auto-detected (macOS → `mac`,
-everything else → `pc`).
+everything else → `pc`). Note that on Linux `pc`'s `getctime` returns the
+inode metadata-change time, not a true creation time.
 
 > **Note:** files are **moved**, not copied. Run against a backup first if
 > you are unsure.
