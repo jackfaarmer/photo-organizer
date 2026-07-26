@@ -86,6 +86,21 @@ def test_main_recursive_organizes_nested_tree(tmp_path, capsys):
     assert len(os.listdir(dest / "Directory_1")) == 5
 
 
+def test_main_copy_preserves_source(tmp_path, capsys):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    source.mkdir()
+    _make_files(source, 3)
+
+    rc = main([str(source), str(dest), "--copy"])
+
+    assert rc == 0
+    assert "Copied 3 file(s)" in capsys.readouterr().out
+    assert len(os.listdir(dest / "Directory_1")) == 3
+    # --copy leaves the originals in the source directory.
+    assert len(os.listdir(source)) == 3
+
+
 def test_main_reports_invalid_items_per_directory(tmp_path, capsys):
     source = tmp_path / "src"
     dest = tmp_path / "dst"

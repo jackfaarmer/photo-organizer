@@ -33,6 +33,78 @@ def test_moves_all_files_into_single_directory(tmp_path):
     assert os.listdir(source) == []
 
 
+def test_copy_mode_preserves_source_files(tmp_path, capsys):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    source.mkdir()
+    originals = _make_files(source, 5)
+
+    copied = organize_photos(str(source), str(dest), items_per_directory=1000, copy=True)
+
+    assert copied == 5
+    assert len(os.listdir(dest / "Directory_1")) == 5
+    # copy=True leaves every source file in place, untouched.
+    assert sorted(os.listdir(source)) == sorted(p.name for p in originals)
+    # The copies are faithful: source and destination bytes match.
+    for original in originals:
+        copied_file = dest / "Directory_1" / original.name
+        assert copied_file.read_text() == original.read_text()
+    # Per-file progress lines use the "Copied" verb (not "Moved").
+    out = capsys.readouterr().out
+    assert "Copied " in out
+    assert "Moved " not in out
+
+
+def test_copy_mode_splits_across_directories_and_preserves_source(tmp_path):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    source.mkdir()
+    originals = _make_files(source, 5)
+
+    # copy mode shares the split loop with move mode; exercise a real split.
+    copied = organize_photos(str(source), str(dest), items_per_directory=2, copy=True)
+
+    assert copied == 5
+    # 5 files, 2 per dir -> Directory_1(2), Directory_2(2), Directory_3(1).
+    assert sorted(os.listdir(dest)) == ["Directory_1", "Directory_2", "Directory_3"]
+    # Every original remains in the source across the split.
+    assert sorted(os.listdir(source)) == sorted(p.name for p in originals)
+
+
+def test_copy_mode_cleans_up_partial_file_on_failure(tmp_path, monkeypatch):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    source.mkdir()
+    _make_files(source, 1)
+
+    def boom(*args, **kwargs):
+        raise OSError("simulated disk full")
+
+    # Simulate a copy failing midway (e.g. the disk filling up).
+    monkeypatch.setattr(organizer.shutil, "copy2", boom)
+
+    with pytest.raises(OSError):
+        organize_photos(str(source), str(dest), copy=True)
+
+    # The copy is atomic: no truncated destination file and no leftover temp
+    # file are left behind after the failure.
+    assert os.listdir(dest / "Directory_1") == []
+
+
+def test_copy_mode_retains_timestamps(tmp_path):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    source.mkdir()
+    (path,) = _make_files(source, 1)
+    expected_mtime = os.stat(path).st_mtime
+
+    organize_photos(str(source), str(dest), items_per_directory=1000, copy=True)
+
+    copied = dest / "Directory_1" / path.name
+    # copy2 preserves the original modification time.
+    assert os.stat(copied).st_mtime == expected_mtime
+
+
 def test_splits_across_directories(tmp_path):
     source = tmp_path / "src"
     dest = tmp_path / "dst"
