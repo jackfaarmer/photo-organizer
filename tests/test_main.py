@@ -56,6 +56,21 @@ def test_main_passes_platform_through(tmp_path, capsys):
     assert (source / ".DS_Store").exists()
 
 
+def test_main_passes_platform_pc(tmp_path, capsys):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    source.mkdir()
+    (source / "photo.jpg").write_text("x")
+    (source / ".DS_Store").write_text("junk")
+
+    rc = main([str(source), str(dest), "--platform", "pc"])
+
+    assert rc == 0
+    assert "Moved 2 file(s)" in capsys.readouterr().out
+    # pc platform does not skip junk, so .DS_Store is moved out of the source.
+    assert not (source / ".DS_Store").exists()
+
+
 def test_main_reports_invalid_items_per_directory(tmp_path, capsys):
     source = tmp_path / "src"
     dest = tmp_path / "dst"

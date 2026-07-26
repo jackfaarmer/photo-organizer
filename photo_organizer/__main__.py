@@ -25,6 +25,7 @@ def main(argv=None):
     parser.add_argument(
         "--platform",
         choices=PLATFORMS,
+        type=str.lower,
         default=None,
         help=(
             "Filesystem behavior to use for reading/routing files. "

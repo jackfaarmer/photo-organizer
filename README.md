@@ -37,7 +37,8 @@ organize_photos(
 )
 ```
 
-You always define both the source and destination paths yourself.
+The source directory is read non-recursively, and the destination directory is
+created automatically if it does not already exist.
 
 `main.py` is kept as an editable example script — adjust the paths at the
 bottom and run `python main.py`.

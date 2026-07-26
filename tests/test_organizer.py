@@ -126,12 +126,14 @@ def test_pc_does_not_skip_dotfiles(tmp_path):
     source.mkdir()
     _make_files(source, 2)
     (source / ".DS_Store").write_text("treated as a regular file on pc")
+    (source / "._photo.jpg").write_text("appledouble sidecar, not skipped on pc")
 
     moved = organize_photos(str(source), str(dest), platform="pc")
 
-    # On pc there is no macOS junk-file skipping, so all 3 files move.
-    assert moved == 3
+    # On pc there is no macOS junk-file skipping, so all 4 files move.
+    assert moved == 4
     assert not (source / ".DS_Store").exists()
+    assert not (source / "._photo.jpg").exists()
 
 
 def test_pc_creation_time_uses_getctime(tmp_path, monkeypatch):
@@ -172,3 +174,13 @@ def test_mac_creation_time_falls_back_without_birthtime(tmp_path, monkeypatch):
 
 def test_platform_defaults_to_host_os():
     assert organizer._normalize_platform(None) in organizer.PLATFORMS
+
+
+def test_detect_platform_maps_darwin_to_mac(monkeypatch):
+    monkeypatch.setattr(organizer.sys, "platform", "darwin")
+    assert organizer._normalize_platform(None) == "mac"
+
+
+def test_detect_platform_maps_non_darwin_to_pc(monkeypatch):
+    monkeypatch.setattr(organizer.sys, "platform", "win32")
+    assert organizer._normalize_platform(None) == "pc"

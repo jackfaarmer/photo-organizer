@@ -63,6 +63,10 @@ def organize_photos(source_dir, dest_dir, items_per_directory=1000, platform=Non
 
     Returns:
         The number of files moved.
+
+    Raises:
+        ValueError: If ``items_per_directory`` is less than 1, or ``platform``
+            is not ``None``, ``"mac"``, or ``"pc"``.
     """
     if items_per_directory < 1:
         raise ValueError("items_per_directory must be at least 1")
