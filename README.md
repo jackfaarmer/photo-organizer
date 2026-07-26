@@ -15,13 +15,13 @@ python -m pip install -e .
 As a command (after installing):
 
 ```bash
-photo-organizer <source_dir> <dest_dir> [items_per_directory] [--platform mac|pc]
+photo-organizer <source_dir> <dest_dir> [items_per_directory] [--platform mac|pc] [--recursive]
 ```
 
 As a module:
 
 ```bash
-python -m photo_organizer <source_dir> <dest_dir> [items_per_directory] [--platform mac|pc]
+python -m photo_organizer <source_dir> <dest_dir> [items_per_directory] [--platform mac|pc] [--recursive]
 ```
 
 From Python:
@@ -34,11 +34,12 @@ organize_photos(
     dest_dir=r"D:\Photos From My Phone\iPhone 12 Reorg",
     items_per_directory=1000,
     platform="pc",  # or "mac"; omit to auto-detect the host OS.
+    recursive=False,  # set True to descend into sub-directories.
 )
 ```
 
-The source directory is read non-recursively, and the destination directory is
-created automatically if it does not already exist.
+The source directory is read non-recursively by default, and the destination
+directory is created automatically if it does not already exist.
 
 `main.py` is kept as an editable example script — adjust the paths at the
 bottom and run `python main.py`.
@@ -57,6 +58,15 @@ filesystem it is running on:
 When `--platform` is omitted, the host OS is auto-detected (macOS → `mac`,
 everything else → `pc`). Note that on Linux `pc`'s `getctime` returns the
 inode metadata-change time, not a true creation time.
+
+### Recursive scanning (`--recursive`)
+
+By default only the top level of `source_dir` is read. Pass `--recursive` to
+walk the tree and collect files at any depth (e.g. a camera's
+`DCIM/100APPLE/…`, `DCIM/101APPLE/…` layout). Because files from different
+sub-folders can share a basename, any collision in a destination subdirectory
+is resolved by appending a numeric suffix (`IMG_0001.HEIC` →
+`IMG_0001_1.HEIC`) so nothing is clobbered.
 
 > **Note:** files are **moved**, not copied. Run against a backup first if
 > you are unsure.
