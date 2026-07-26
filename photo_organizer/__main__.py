@@ -1,20 +1,50 @@
+import argparse
 import sys
 
-from .organizer import organize_photos
-
-USAGE = "Usage: photo-organizer <source_dir> <dest_dir> [items_per_directory]"
+from .organizer import PLATFORMS, organize_photos
 
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
-    if len(argv) < 2:
-        print(USAGE, file=sys.stderr)
+
+    parser = argparse.ArgumentParser(
+        prog="photo-organizer",
+        description=(
+            "Sort a directory of photos into numbered subdirectories by creation date."
+        ),
+    )
+    parser.add_argument("source_dir", help="Directory to read files from (non-recursive).")
+    parser.add_argument("dest_dir", help="Directory to create the numbered subdirectories in.")
+    parser.add_argument(
+        "items_per_directory",
+        nargs="?",
+        type=int,
+        default=1000,
+        help="Maximum number of files placed in each subdirectory (default: 1000).",
+    )
+    parser.add_argument(
+        "--platform",
+        choices=PLATFORMS,
+        type=str.lower,
+        default=None,
+        help=(
+            "Filesystem behavior to use for reading/routing files. "
+            "Defaults to auto-detecting the host OS."
+        ),
+    )
+    args = parser.parse_args(argv)
+
+    try:
+        moved = organize_photos(
+            args.source_dir,
+            args.dest_dir,
+            args.items_per_directory,
+            platform=args.platform,
+        )
+    except (ValueError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    source_dir, dest_dir = argv[0], argv[1]
-    items_per_directory = int(argv[2]) if len(argv) > 2 else 1000
-
-    moved = organize_photos(source_dir, dest_dir, items_per_directory)
     print(f"Done. Moved {moved} file(s).")
     return 0
 
