@@ -71,6 +71,21 @@ def test_main_passes_platform_pc(tmp_path, capsys):
     assert not (source / ".DS_Store").exists()
 
 
+def test_main_recursive_organizes_nested_tree(tmp_path, capsys):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    (source / "100APPLE").mkdir(parents=True)
+    (source / "101APPLE").mkdir(parents=True)
+    _make_files(source / "100APPLE", 2)
+    _make_files(source / "101APPLE", 3)
+
+    rc = main([str(source), str(dest), "--recursive"])
+
+    assert rc == 0
+    assert "Moved 5 file(s)" in capsys.readouterr().out
+    assert len(os.listdir(dest / "Directory_1")) == 5
+
+
 def test_main_reports_invalid_items_per_directory(tmp_path, capsys):
     source = tmp_path / "src"
     dest = tmp_path / "dst"

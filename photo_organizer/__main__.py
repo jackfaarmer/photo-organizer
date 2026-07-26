@@ -13,7 +13,9 @@ def main(argv=None):
             "Sort a directory of photos into numbered subdirectories by creation date."
         ),
     )
-    parser.add_argument("source_dir", help="Directory to read files from (non-recursive).")
+    parser.add_argument(
+        "source_dir", help="Directory to read files from (top-level only by default)."
+    )
     parser.add_argument("dest_dir", help="Directory to create the numbered subdirectories in.")
     parser.add_argument(
         "items_per_directory",
@@ -32,6 +34,14 @@ def main(argv=None):
             "Defaults to auto-detecting the host OS."
         ),
     )
+    parser.add_argument(
+        "--recursive",
+        action="store_true",
+        help=(
+            "Recurse into sub-directories of source_dir, collecting files at any "
+            "depth (default: read only the top level)."
+        ),
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -40,6 +50,7 @@ def main(argv=None):
             args.dest_dir,
             args.items_per_directory,
             platform=args.platform,
+            recursive=args.recursive,
         )
     except (ValueError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)

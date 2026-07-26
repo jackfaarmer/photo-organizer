@@ -60,6 +60,140 @@ def test_creates_destination_if_missing(tmp_path):
     assert dest.is_dir()
 
 
+def test_recursive_collects_nested_files(tmp_path):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    (source / "100APPLE").mkdir(parents=True)
+    (source / "101APPLE").mkdir(parents=True)
+    _make_files(source / "100APPLE", 3)
+    _make_files(source / "101APPLE", 4)
+
+    moved = organize_photos(str(source), str(dest), recursive=True)
+
+    assert moved == 7
+    assert sorted(os.listdir(dest)) == ["Directory_1"]
+    assert len(os.listdir(dest / "Directory_1")) == 7
+
+
+def test_non_recursive_ignores_nested_files(tmp_path):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    (source / "100APPLE").mkdir(parents=True)
+    _make_files(source / "100APPLE", 3)
+
+    # Default (recursive=False) reads only the top level, which has no files.
+    moved = organize_photos(str(source), str(dest))
+
+    assert moved == 0
+    assert os.listdir(dest) == []
+    # Nested files are left untouched.
+    assert len(os.listdir(source / "100APPLE")) == 3
+
+
+def test_recursive_skips_broken_symlinks(tmp_path):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    (source / "100APPLE").mkdir(parents=True)
+    _make_files(source / "100APPLE", 2)
+    # A broken symlink is listed by os.walk but os.stat would raise on it;
+    # the collector must skip it rather than abort the whole run.
+    broken = source / "100APPLE" / "dangling.jpg"
+    try:
+        os.symlink(source / "nonexistent-target.jpg", broken)
+    except (OSError, NotImplementedError):
+        pytest.skip("platform does not support symlinks")
+
+    moved = organize_photos(str(source), str(dest), recursive=True)
+
+    assert moved == 2
+    assert len(os.listdir(dest / "Directory_1")) == 2
+
+
+def test_recursive_dedupes_colliding_basenames(tmp_path):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    (source / "100APPLE").mkdir(parents=True)
+    (source / "101APPLE").mkdir(parents=True)
+    first = source / "100APPLE" / "IMG_0001.jpg"
+    second = source / "101APPLE" / "IMG_0001.jpg"
+    first.write_text("from 100APPLE")
+    second.write_text("from 101APPLE")
+    # Stagger timestamps so ordering is deterministic (first moved first).
+    os.utime(first, (1_600_000_000, 1_600_000_000))
+    os.utime(second, (1_600_000_060, 1_600_000_060))
+
+    moved = organize_photos(str(source), str(dest), items_per_directory=1000, recursive=True)
+
+    assert moved == 2
+    directory = dest / "Directory_1"
+    # Both files survive as two distinct files; nothing is clobbered.
+    assert sorted(os.listdir(directory)) == ["IMG_0001.jpg", "IMG_0001_1.jpg"]
+    # Ordering is deterministic: the earlier-ctime file keeps the bare name, the
+    # later one gets the numeric suffix.
+    assert (directory / "IMG_0001.jpg").read_text() == "from 100APPLE"
+    assert (directory / "IMG_0001_1.jpg").read_text() == "from 101APPLE"
+
+
+def test_recursive_skips_nested_mac_junk(tmp_path):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    (source / "100APPLE").mkdir(parents=True)
+    _make_files(source / "100APPLE", 3)
+    # macOS artifacts nested inside a subfolder must be left behind.
+    (source / "100APPLE" / ".DS_Store").write_text("finder metadata")
+    (source / "100APPLE" / "._sidecar.jpg").write_text("appledouble sidecar")
+
+    moved = organize_photos(str(source), str(dest), platform="mac", recursive=True)
+
+    assert moved == 3
+    assert len(os.listdir(dest / "Directory_1")) == 3
+    assert (source / "100APPLE" / ".DS_Store").exists()
+    assert (source / "100APPLE" / "._sidecar.jpg").exists()
+
+
+def test_recursive_collects_files_at_arbitrary_depth(tmp_path):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    deep = source / "a" / "b" / "c" / "d"
+    deep.mkdir(parents=True)
+    _make_files(source / "a", 1)
+    _make_files(deep, 2)
+
+    moved = organize_photos(str(source), str(dest), recursive=True)
+
+    assert moved == 3
+    assert sorted(os.listdir(dest)) == ["Directory_1"]
+    assert len(os.listdir(dest / "Directory_1")) == 3
+
+
+def test_unique_dest_path_returns_free_path_unchanged(tmp_path):
+    assert organizer._unique_dest_path(str(tmp_path), "IMG_0001.jpg") == str(
+        tmp_path / "IMG_0001.jpg"
+    )
+
+
+def test_unique_dest_path_suffixes_on_collision(tmp_path):
+    (tmp_path / "IMG_0001.jpg").write_text("existing")
+    assert organizer._unique_dest_path(str(tmp_path), "IMG_0001.jpg") == str(
+        tmp_path / "IMG_0001_1.jpg"
+    )
+
+
+def test_unique_dest_path_increments_past_first_suffix(tmp_path):
+    (tmp_path / "IMG_0001.jpg").write_text("a")
+    (tmp_path / "IMG_0001_1.jpg").write_text("b")
+    assert organizer._unique_dest_path(str(tmp_path), "IMG_0001.jpg") == str(
+        tmp_path / "IMG_0001_2.jpg"
+    )
+
+
+def test_unique_dest_path_handles_extensionless_names(tmp_path):
+    (tmp_path / "IMG_0001").write_text("existing")
+    assert organizer._unique_dest_path(str(tmp_path), "IMG_0001") == str(
+        tmp_path / "IMG_0001_1"
+    )
+
+
 def test_ignores_subdirectories_in_source(tmp_path):
     source = tmp_path / "src"
     dest = tmp_path / "dst"
