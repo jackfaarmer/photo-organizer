@@ -1,6 +1,7 @@
 import os
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 MAC = "mac"
@@ -93,6 +94,32 @@ def _unique_dest_path(directory, filename):
         counter += 1
 
 
+def _atomic_copy2(source_path, dest_path):
+    """Copy ``source_path`` to ``dest_path`` preserving metadata, atomically.
+
+    ``shutil.copy2`` writes straight to the destination, so an interrupted or
+    failing copy (a full disk, a pulled drive) leaves a truncated file behind —
+    and because copy mode never overwrites, that garbage would sit alongside the
+    good files. Copy to a temp file in the same directory first, then
+    ``os.replace`` it into place: the destination only ever appears complete,
+    and any partial temp file is removed on failure.
+    """
+    dest_dir = os.path.dirname(dest_path)
+    fd, tmp_path = tempfile.mkstemp(dir=dest_dir, prefix=".photo-organizer-tmp-")
+    os.close(fd)
+    try:
+        shutil.copy2(source_path, tmp_path)
+        os.replace(tmp_path, dest_path)
+    except BaseException:
+        # Clean up the partial temp file on any error or interrupt (e.g.
+        # KeyboardInterrupt) so no stray fragments are left in the destination.
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
 def organize_photos(
     source_dir, dest_dir, items_per_directory=1000, platform=None, recursive=False, copy=False
 ):
@@ -146,9 +173,10 @@ def organize_photos(
     # Sort files by creation date
     files_sorted_by_date.sort(key=lambda x: x[1])
 
-    # Choose the transfer once: copy2 preserves the originals (and their
-    # timestamps/metadata); move deletes each source after placing it.
-    transfer = shutil.copy2 if copy else shutil.move
+    # Choose the transfer once: copy preserves the originals (and their
+    # timestamps/metadata) and lands each file atomically; move deletes each
+    # source after placing it.
+    transfer = _atomic_copy2 if copy else shutil.move
     verb = "Copied" if copy else "Moved"
 
     directory_count = 0
