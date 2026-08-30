@@ -14,11 +14,9 @@ PLATFORMS = (MAC, PC)
 _MAC_JUNK_NAMES = frozenset({".DS_Store"})
 _MAC_JUNK_PREFIXES = ("._",)
 
-# Prefix for the in-flight temp files ``_atomic_copy2`` writes before renaming
-# them into place. Shared so the duplicate index can ignore them.
+# Temp files written by ``_atomic_copy2``; the duplicate index skips them.
 _TMP_PREFIX = ".photo-organizer-tmp-"
 
-# Read size for streaming hashes; photo libraries are far too large to slurp.
 _DIGEST_CHUNK_SIZE = 1024 * 1024
 
 
@@ -129,11 +127,7 @@ def _atomic_copy2(source_path, dest_path):
 
 
 def _file_digest(path):
-    """Return the SHA-256 hex digest of ``path``, read in chunks.
-
-    Photo libraries routinely hold multi-gigabyte files, so the contents are
-    streamed rather than read into memory all at once.
-    """
+    """Return the SHA-256 hex digest of ``path``, streamed to bound memory."""
     digest = hashlib.sha256()
     with open(path, "rb") as handle:
         for block in iter(lambda: handle.read(_DIGEST_CHUNK_SIZE), b""):
@@ -142,14 +136,7 @@ def _file_digest(path):
 
 
 def _index_dest_by_size(dest_dir):
-    """Return ``{size: [path, ...]}`` for every file already in ``dest_dir``.
-
-    Size is a cheap pre-filter for duplicate detection: two files can only hold
-    identical content if their sizes match, and building this index only walks
-    and stats the destination without reading any of it. In-flight
-    ``_atomic_copy2`` temp files are excluded so a crashed run's leftovers can
-    never be mistaken for an imported photo.
-    """
+    """Return ``{size: [path, ...]}`` for ``dest_dir``, a stat-only duplicate index."""
     index = {}
     for dirpath, _dirs, filenames in os.walk(dest_dir):
         for filename in filenames:
@@ -159,8 +146,7 @@ def _index_dest_by_size(dest_dir):
             try:
                 size = os.path.getsize(path)
             except OSError:
-                # Broken symlink, or a file that vanished mid-walk. It cannot be
-                # matched against anyway, so leave it out of the index.
+                # Broken symlink or vanished mid-walk; nothing can match it.
                 continue
             index.setdefault(size, []).append(path)
     return index
@@ -169,14 +155,7 @@ def _index_dest_by_size(dest_dir):
 def _is_duplicate(source_path, size_index, digest_cache):
     """Return True when ``source_path``'s content is already in the destination.
 
-    A source file whose size appears nowhere in the destination is rejected
-    without hashing anything, so an import with no duplicates reads no file
-    contents at all. Only on a size match are the candidates hashed, and their
-    digests are memoized in ``digest_cache`` so a size shared by many files
-    costs one hash per file rather than one per comparison.
-
-    Matching on content rather than filename means a photo renamed in the
-    destination after an earlier import is still recognized.
+    Compares content, not filenames, and only hashes on a size collision.
     """
     candidates = size_index.get(os.path.getsize(source_path))
     if not candidates:
@@ -188,8 +167,7 @@ def _is_duplicate(source_path, size_index, digest_cache):
             try:
                 digest = _file_digest(candidate)
             except OSError:
-                # Unreadable destination file: treat it as a non-match rather
-                # than aborting an otherwise good import.
+                # Unreadable destination file: non-match beats aborting the run.
                 continue
             digest_cache[candidate] = digest
         if digest == source_digest:
@@ -224,15 +202,13 @@ def organize_photos(
             each file is moved (``shutil.move``), which deletes it from the
             source. Use ``copy=True`` for non-destructive imports.
 
-            Copy mode is idempotent: any source file whose content is already
-            present in ``dest_dir`` is skipped rather than copied again under a
-            suffixed name, so an interrupted or repeated import can be re-run
-            safely. Files are matched by content, so a photo renamed in the
-            destination is still recognized. Move mode is unaffected.
+            Copy mode is idempotent: source files whose content is already in
+            ``dest_dir`` are skipped, so a repeated or interrupted import can be
+            re-run safely. Move mode is unaffected.
 
     Returns:
-        The number of files actually moved (or copied). Files skipped as
-        already-present duplicates are not counted.
+        The number of files actually moved (or copied); skipped duplicates are
+        not counted.
 
     Raises:
         ValueError: If ``items_per_directory`` is less than 1, or ``platform``
@@ -251,11 +227,7 @@ def organize_photos(
     # Create destination directory if it doesn't exist
     Path(dest_dir).mkdir(parents=True, exist_ok=True)
 
-    # Copy mode is re-runnable: index what the destination already holds so a
-    # repeated import skips those photos instead of copying them again under a
-    # suffixed name. Built once, by size only, so nothing is read unless a
-    # source file's size actually collides. Move mode keeps its existing
-    # behavior untouched (see issue #6).
+    # Copy mode only; move mode keeps its existing behavior (see issue #6).
     size_index = _index_dest_by_size(dest_dir) if copy else {}
     digest_cache = {}
 
@@ -279,9 +251,7 @@ def organize_photos(
     for source_path, _ in files_sorted_by_date:
         filename = os.path.basename(source_path)
 
-        # Already imported: leave the source alone and move on. Skipped files
-        # deliberately do not increment ``file_count``, so they consume no slot
-        # in the ``items_per_directory`` split.
+        # Skips do not increment file_count, so they consume no split slot.
         if copy and _is_duplicate(source_path, size_index, digest_cache):
             skipped_count += 1
             print(f"Skipped {filename} (already in destination)")
@@ -300,8 +270,7 @@ def organize_photos(
         print(f"{verb} {os.path.basename(dest_path)} to {current_sub_dir}")
 
         if copy:
-            # Register the new arrival so a second copy of the same content
-            # later in this same run is skipped too, not just on a re-run.
+            # Registered so identical files later in this same run also skip.
             size_index.setdefault(os.path.getsize(dest_path), []).append(dest_path)
 
         file_count += 1

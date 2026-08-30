@@ -24,11 +24,9 @@ def _chunk(tag, data):
 
 
 def _png_bytes(index=0):
-    """Return the bytes of a minimal valid 1x1 truecolor PNG.
+    """Return a minimal valid 1x1 truecolor PNG, made unique by ``index``.
 
-    ``index`` is embedded in a tEXt chunk so each generated image has distinct
-    content, the way real photos do. Copy mode matches duplicates by content,
-    so byte-identical fixtures would collapse into a single import.
+    Copy mode dedupes by content, so identical fixtures would collapse to one.
     """
     signature = b"\x89PNG\r\n\x1a\n"
     ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)  # 1x1, 8-bit, truecolor
@@ -45,10 +43,9 @@ def _png_bytes(index=0):
 
 
 def _make_images(directory, count, order=None):
-    """Write ``count`` real 1x1 PNG images named ``photo_000.png`` ...
+    """Write ``count`` unique 1x1 PNGs named ``photo_000.png`` ...
 
-    Each image holds distinct bytes. ``order`` controls the on-disk creation
-    order (defaults to natural order). Returns the sorted list of filenames.
+    ``order`` sets the on-disk creation order. Returns the sorted filenames.
     """
     indices = range(count) if order is None else order
     names = []
@@ -121,7 +118,6 @@ def test_rerunning_copy_import_does_not_duplicate(tmp_path):
     second = organize_photos(str(dir_a), str(dir_b), items_per_directory=PER_FOLDER, copy=True)
 
     assert first == IMAGE_COUNT
-    # The whole library is recognized on the second pass; nothing is re-copied.
     assert second == 0
 
     landed = sorted(
@@ -132,7 +128,6 @@ def test_rerunning_copy_import_does_not_duplicate(tmp_path):
     # 100 images total, not 200 with suffixed duplicates.
     assert len(landed) == IMAGE_COUNT
     assert landed == created
-    # Copy mode left the source library fully intact across both runs.
     assert sorted(os.listdir(dir_a)) == created
 
 

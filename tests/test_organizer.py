@@ -116,10 +116,9 @@ def test_copy_mode_is_idempotent_on_rerun(tmp_path):
     second = organize_photos(str(source), str(dest), items_per_directory=1000, copy=True)
 
     assert first == 5
-    # Every file is recognized as already imported, so nothing is copied again.
     assert second == 0
     assert len(os.listdir(dest / "Directory_1")) == 5
-    # No suffixed duplicates (IMG_0001_1.jpg) were created.
+    # No suffixed duplicates (photo_000_1.jpg) were created.
     assert sorted(os.listdir(dest / "Directory_1")) == sorted(p.name for p in originals)
     assert sorted(os.listdir(source)) == sorted(p.name for p in originals)
 
@@ -132,7 +131,7 @@ def test_copy_mode_rerun_imports_only_new_files(tmp_path):
 
     organize_photos(str(source), str(dest), items_per_directory=1000, copy=True)
 
-    # Two genuinely new photos arrive in the source after the first import.
+    # Two new photos arrive after the first import.
     for i in (5, 6):
         path = source / f"photo_{i:03d}.jpg"
         path.write_text(f"content {i}")
@@ -153,8 +152,7 @@ def test_copy_mode_recognizes_renamed_destination_file(tmp_path):
     _make_files(source, 1)
 
     organize_photos(str(source), str(dest), copy=True)
-    # Duplicates are matched on content, not filename, so renaming the imported
-    # copy must not cause the source file to be imported a second time.
+    # Matching is on content, so a renamed import is still recognized.
     (dest / "Directory_1" / "photo_000.jpg").rename(dest / "Directory_1" / "vacation.jpg")
 
     copied = organize_photos(str(source), str(dest), copy=True)
@@ -167,7 +165,7 @@ def test_copy_mode_imports_same_size_files_with_different_content(tmp_path):
     source = tmp_path / "src"
     dest = tmp_path / "dst"
     source.mkdir()
-    # Identical sizes, different bytes: size alone must not declare a duplicate.
+    # Equal sizes, different bytes: size alone must not declare a duplicate.
     (source / "a.jpg").write_text("AAAA")
     (source / "b.jpg").write_text("BBBB")
 
@@ -181,13 +179,12 @@ def test_copy_mode_collapses_duplicates_within_one_run(tmp_path):
     source = tmp_path / "src"
     dest = tmp_path / "dst"
     source.mkdir()
-    # The same photo sitting in the source twice under different names.
+    # The same photo twice under different names.
     (source / "IMG_0001.jpg").write_text("same bytes")
     (source / "IMG_0001_copy.jpg").write_text("same bytes")
 
     copied = organize_photos(str(source), str(dest), copy=True)
 
-    # Newly copied files join the index, so the second identical file is skipped.
     assert copied == 1
     assert len(os.listdir(dest / "Directory_1")) == 1
 
@@ -199,7 +196,7 @@ def test_copy_mode_reports_skipped_count(tmp_path, capsys):
     _make_files(source, 3)
 
     organize_photos(str(source), str(dest), copy=True)
-    capsys.readouterr()  # discard the first run's output
+    capsys.readouterr()  # discard first-run output
     organize_photos(str(source), str(dest), copy=True)
 
     out = capsys.readouterr().out
@@ -211,7 +208,7 @@ def test_copy_mode_does_not_hash_when_no_size_matches(tmp_path, monkeypatch):
     source = tmp_path / "src"
     dest = tmp_path / "dst"
     source.mkdir()
-    # Distinct sizes throughout, so the size pre-filter alone settles every file.
+    # Distinct sizes, so the pre-filter alone settles every file.
     for i in range(4):
         (source / f"photo_{i}.jpg").write_text("x" * (i + 1))
 
@@ -231,12 +228,10 @@ def test_move_mode_rerun_behavior_is_unchanged(tmp_path):
     _make_files(source, 2)
 
     organize_photos(str(source), str(dest), items_per_directory=1000)
-    # Re-create the same files and move them again into the populated dest.
     _make_files(source, 2)
     moved = organize_photos(str(source), str(dest), items_per_directory=1000)
 
-    # Move mode does NOT skip duplicates: both files transfer again and are
-    # suffixed rather than recognized. Idempotency is copy-mode only for now.
+    # Move mode does not skip duplicates; idempotency is copy-mode only.
     assert moved == 2
     assert len(os.listdir(dest / "Directory_1")) == 4
 
@@ -263,7 +258,7 @@ def test_index_dest_by_size_walks_nested_directories(tmp_path):
 
 
 def test_index_dest_by_size_ignores_temp_files(tmp_path):
-    # A crashed run's leftover fragment must never mask a real photo.
+    # A crashed run's fragment must never mask a real photo.
     (tmp_path / f"{organizer._TMP_PREFIX}abc123").write_text("partial")
 
     assert organizer._index_dest_by_size(str(tmp_path)) == {}
@@ -281,7 +276,7 @@ def test_file_digest_matches_hashlib(tmp_path):
 
 
 def test_file_digest_streams_large_files(tmp_path):
-    # Spans several read chunks, exercising the streaming loop.
+    # Spans several read chunks.
     payload = b"z" * (organizer._DIGEST_CHUNK_SIZE * 2 + 7)
     path = tmp_path / "big.jpg"
     path.write_bytes(payload)
