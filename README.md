@@ -6,9 +6,64 @@ creation time and capped at a configurable number of files per subdirectory.
 
 ## Installation
 
+### Global install (recommended)
+
+[pipx](https://pipx.pypa.io) installs the tool into its own isolated
+environment and puts the `photo-organizer` command on your PATH for you:
+
+```bash
+python -m pip install --user pipx
+python -m pipx ensurepath
+pipx install .
+```
+
+Open a new terminal afterwards (`ensurepath` only affects shells started
+after it runs). `photo-organizer` is then available from any directory, and
+this repository is no longer needed — pipx copied the package out.
+
+Plain pip works too, if you would rather not add pipx:
+
+```bash
+python -m pip install .
+```
+
+Note there is no `-e`: that copies the package into `site-packages` rather
+than linking back to this checkout, so you can move or delete the repo
+afterwards. You are responsible for the PATH step yourself — see below.
+
+### Windows: `command not found` after installing
+
+`pip` installs the launcher as `photo-organizer.exe` in your Python
+installation's **Scripts** directory, which is frequently not on PATH. pip
+prints a warning about this during install, but it is easy to miss. Locate
+the directory with:
+
+```bash
+python -c "import sysconfig; print(sysconfig.get_path('scripts'))"
+```
+
+(For a `--user` install, pass `'scripts', 'nt_user'` instead.) Add that path
+to your account's `Path` environment variable and open a new terminal.
+
+To skip PATH configuration entirely, invoke the package as a module — it is
+the same entry point and accepts identical arguments:
+
+```bash
+python -m photo_organizer <source_dir> <dest_dir>
+```
+
+If `python` and `py` point at different Python installations, install and run
+with the same one (`py -m pip install .` then `py -m photo_organizer`), or the
+launcher will land in an interpreter you are not invoking.
+
+### Editable install (for working on the code)
+
 ```bash
 python -m pip install -e .
 ```
+
+This links back to the checkout so edits take effect immediately, but it means
+the repository must stay where it is. See [Development](#development).
 
 ## Usage
 
