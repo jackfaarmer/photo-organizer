@@ -70,7 +70,8 @@ def main(argv=None):
 
     verb = "Copied" if args.copy else "Moved"
     print(f"Done. {verb} {count} file(s).")
-    return 0
+    # Per-file failures no longer abort the run, so surface them in the status.
+    return 1 if getattr(count, "failures", ()) else 0
 
 
 if __name__ == "__main__":

@@ -84,11 +84,12 @@ def test_copy_mode_cleans_up_partial_file_on_failure(tmp_path, monkeypatch):
     # Simulate a copy failing midway (e.g. the disk filling up).
     monkeypatch.setattr(organizer.shutil, "copy2", boom)
 
-    with pytest.raises(OSError):
-        organize_photos(str(source), str(dest), copy=True)
+    result = organize_photos(str(source), str(dest), copy=True)
 
-    # The copy is atomic: no truncated destination file and no leftover temp
-    # file are left behind after the failure.
+    # The failure is recorded rather than aborting the run, and the copy is
+    # atomic: no truncated file and no leftover temp file remain.
+    assert result == 0
+    assert len(result.failures) == 1
     assert os.listdir(dest / "Directory_1") == []
 
 
@@ -310,6 +311,207 @@ def test_splits_across_directories(tmp_path):
     assert len(os.listdir(dest / "Directory_1")) == 2
     assert len(os.listdir(dest / "Directory_2")) == 2
     assert len(os.listdir(dest / "Directory_3")) == 1
+
+
+def test_rerun_fills_partial_directory_before_opening_the_next(tmp_path):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    source.mkdir()
+    _make_files(source, 2)
+
+    organize_photos(str(source), str(dest), items_per_directory=4)
+    _make_files(source, 2)
+    organize_photos(str(source), str(dest), items_per_directory=4)
+
+    # Directory_1 had 2 of 4 slots used; the re-run tops it up rather than
+    # restarting numbering and blowing past the cap.
+    assert sorted(os.listdir(dest)) == ["Directory_1"]
+    assert len(os.listdir(dest / "Directory_1")) == 4
+
+
+def test_rerun_opens_next_directory_when_last_is_full(tmp_path):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    source.mkdir()
+    _make_files(source, 2)
+
+    organize_photos(str(source), str(dest), items_per_directory=2)
+    _make_files(source, 3)
+    organize_photos(str(source), str(dest), items_per_directory=2)
+
+    assert sorted(os.listdir(dest)) == ["Directory_1", "Directory_2", "Directory_3"]
+    assert len(os.listdir(dest / "Directory_1")) == 2
+    assert len(os.listdir(dest / "Directory_2")) == 2
+    assert len(os.listdir(dest / "Directory_3")) == 1
+
+
+def test_rerun_never_exceeds_items_per_directory(tmp_path):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    source.mkdir()
+
+    for _ in range(4):
+        _make_files(source, 3)
+        organize_photos(str(source), str(dest), items_per_directory=5)
+
+    counts = [len(os.listdir(dest / d)) for d in os.listdir(dest)]
+    assert sum(counts) == 12
+    assert max(counts) <= 5
+
+
+def test_resume_numbering_ignores_unrelated_directories(tmp_path):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    source.mkdir()
+    dest.mkdir()
+    (dest / "Vacation").mkdir()
+    (dest / "Directory_notanumber").mkdir()
+    _make_files(source, 1)
+
+    organize_photos(str(source), str(dest), items_per_directory=2)
+
+    # Only Directory_<int> participates in numbering.
+    assert (dest / "Directory_1").is_dir()
+    assert len(os.listdir(dest / "Directory_1")) == 1
+
+
+def test_resume_point_reports_last_directory_and_fill(tmp_path):
+    (tmp_path / "Directory_1").mkdir()
+    (tmp_path / "Directory_2").mkdir()
+    (tmp_path / "Directory_2" / "a.jpg").write_text("a")
+
+    assert organizer._resume_point(str(tmp_path), 10) == (2, 1)
+
+
+def test_resume_point_on_empty_destination(tmp_path):
+    # (0, cap) makes the transfer loop open Directory_1 on its first file.
+    assert organizer._resume_point(str(tmp_path), 10) == (0, 10)
+
+
+def test_resume_point_ignores_temp_files_when_counting(tmp_path):
+    (tmp_path / "Directory_1").mkdir()
+    (tmp_path / "Directory_1" / f"{organizer._TMP_PREFIX}xyz").write_text("partial")
+
+    assert organizer._resume_point(str(tmp_path), 10) == (1, 0)
+
+
+def test_failed_transfer_does_not_abort_the_run(tmp_path, monkeypatch):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    source.mkdir()
+    _make_files(source, 5)
+    doomed = str(source / "photo_002.jpg")
+    real_move = organizer.shutil.move
+
+    def flaky(src, dst):
+        if src == doomed:
+            raise OSError("simulated locked file")
+        return real_move(src, dst)
+
+    monkeypatch.setattr(organizer.shutil, "move", flaky)
+
+    result = organize_photos(str(source), str(dest), items_per_directory=1000)
+
+    # The other four still transfer; only the locked file is left behind.
+    assert result == 4
+    assert len(result.failures) == 1
+    assert result.failures[0][0] == doomed
+    assert os.listdir(source) == ["photo_002.jpg"]
+    assert len(os.listdir(dest / "Directory_1")) == 4
+
+
+def test_failed_transfer_consumes_no_directory_slot(tmp_path, monkeypatch):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    source.mkdir()
+    _make_files(source, 4)
+    real_move = organizer.shutil.move
+
+    def flaky(src, dst):
+        if os.path.basename(src) == "photo_001.jpg":
+            raise OSError("simulated locked file")
+        return real_move(src, dst)
+
+    monkeypatch.setattr(organizer.shutil, "move", flaky)
+
+    result = organize_photos(str(source), str(dest), items_per_directory=2)
+
+    # 3 files landed; a failure must not leave a hole in the 2-per-dir split.
+    assert result == 3
+    assert len(os.listdir(dest / "Directory_1")) == 2
+    assert len(os.listdir(dest / "Directory_2")) == 1
+
+
+def test_failure_is_reported_on_stderr(tmp_path, monkeypatch, capsys):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    source.mkdir()
+    _make_files(source, 1)
+
+    def boom(*args, **kwargs):
+        raise OSError("simulated locked file")
+
+    monkeypatch.setattr(organizer.shutil, "move", boom)
+
+    organize_photos(str(source), str(dest))
+
+    err = capsys.readouterr().err
+    assert "could not transfer photo_000.jpg" in err
+    assert "1 file(s) could not be transferred." in err
+
+
+def test_unreadable_source_in_copy_mode_does_not_abort_the_run(tmp_path, monkeypatch):
+    """The duplicate check reads the source, so it must be guarded too."""
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    source.mkdir()
+    # Equal sizes force _is_duplicate to hash, which is where the read happens;
+    # distinct bytes keep them from being genuine duplicates.
+    for name, body in (("a.jpg", "aaaaaaa"), ("b.jpg", "bbbbbbb"), ("c.jpg", "ccccccc")):
+        (source / name).write_text(body)
+
+    real_digest = organizer._file_digest
+
+    def flaky(path):
+        if os.path.basename(path) == "b.jpg":
+            raise PermissionError(13, "Permission denied")
+        return real_digest(path)
+
+    monkeypatch.setattr(organizer, "_file_digest", flaky)
+
+    result = organize_photos(str(source), str(dest), copy=True)
+
+    assert result == 2
+    assert len(result.failures) == 1
+    assert os.path.basename(result.failures[0][0]) == "b.jpg"
+
+
+def test_move_mode_does_not_overwrite_existing_destination_file(tmp_path):
+    """Regression guard for #6: a name collision must never clobber."""
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    source.mkdir()
+    (dest / "Directory_1").mkdir(parents=True)
+    (dest / "Directory_1" / "photo_000.jpg").write_text("precious original")
+    _make_files(source, 1)
+
+    organize_photos(str(source), str(dest), items_per_directory=1000)
+
+    assert (dest / "Directory_1" / "photo_000.jpg").read_text() == "precious original"
+    assert sorted(os.listdir(dest / "Directory_1")) == ["photo_000.jpg", "photo_000_1.jpg"]
+
+
+def test_organize_result_behaves_as_an_int(tmp_path):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    source.mkdir()
+    _make_files(source, 3)
+
+    result = organize_photos(str(source), str(dest))
+
+    assert result == 3
+    assert result + 1 == 4
+    assert result.failures == ()
 
 
 def test_creates_destination_if_missing(tmp_path):

@@ -1,5 +1,6 @@
 import hashlib
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -18,6 +19,19 @@ _MAC_JUNK_PREFIXES = ("._",)
 _TMP_PREFIX = ".photo-organizer-tmp-"
 
 _DIGEST_CHUNK_SIZE = 1024 * 1024
+
+_DIRECTORY_PATTERN = re.compile(r"^Directory_(\d+)$")
+
+
+class OrganizeResult(int):
+    """Count of files transferred; ``failures`` holds ``(path, error)`` pairs."""
+
+    failures = ()
+
+    def __new__(cls, count, failures=()):
+        result = super().__new__(cls, count)
+        result.failures = tuple(failures)
+        return result
 
 
 def _detect_platform():
@@ -126,6 +140,29 @@ def _atomic_copy2(source_path, dest_path):
         raise
 
 
+def _resume_point(dest_dir, items_per_directory):
+    """Return ``(directory_number, files_in_it)`` to continue an earlier run.
+
+    Returns ``(0, items_per_directory)`` for a fresh destination, which makes
+    the transfer loop open ``Directory_1`` on its first file.
+    """
+    highest = 0
+    for name in os.listdir(dest_dir):
+        match = _DIRECTORY_PATTERN.match(name)
+        if match and os.path.isdir(os.path.join(dest_dir, name)):
+            highest = max(highest, int(match.group(1)))
+    if highest == 0:
+        return 0, items_per_directory
+
+    last = os.path.join(dest_dir, f"Directory_{highest}")
+    used = sum(
+        1
+        for entry in os.listdir(last)
+        if not entry.startswith(_TMP_PREFIX) and os.path.isfile(os.path.join(last, entry))
+    )
+    return highest, used
+
+
 def _file_digest(path):
     """Return the SHA-256 hex digest of ``path``, streamed to bound memory."""
     digest = hashlib.sha256()
@@ -207,8 +244,14 @@ def organize_photos(
             re-run safely. Move mode is unaffected.
 
     Returns:
-        The number of files actually moved (or copied); skipped duplicates are
-        not counted.
+        An ``OrganizeResult`` (an ``int`` of the files actually transferred)
+        whose ``failures`` holds ``(path, error)`` for each file that could not
+        be transferred. Skipped duplicates are not counted.
+
+        Numbering resumes from any existing ``Directory_N``, filling a partial
+        one before opening the next, so repeated runs respect
+        ``items_per_directory``. A file that fails to transfer is reported and
+        skipped; the rest of the run continues.
 
     Raises:
         ValueError: If ``items_per_directory`` is less than 1, or ``platform``
@@ -243,39 +286,53 @@ def organize_photos(
     transfer = _atomic_copy2 if copy else shutil.move
     verb = "Copied" if copy else "Moved"
 
-    directory_count = 0
+    # Resume an earlier run's numbering instead of restarting at Directory_1.
+    directory_count, slots_used = _resume_point(dest_dir, items_per_directory)
+    current_sub_dir = (
+        os.path.join(dest_dir, f"Directory_{directory_count}") if directory_count else None
+    )
     file_count = 0
     skipped_count = 0
-    current_sub_dir = None
+    failures = []
 
     for source_path, _ in files_sorted_by_date:
         filename = os.path.basename(source_path)
 
-        # Skips do not increment file_count, so they consume no split slot.
-        if copy and _is_duplicate(source_path, size_index, digest_cache):
-            skipped_count += 1
-            print(f"Skipped {filename} (already in destination)")
+        # Guarded as one unit: the duplicate check reads the source to hash it,
+        # so it fails on exactly the files the transfer would fail on.
+        try:
+            # Skips do not increment file_count, so they consume no split slot.
+            if copy and _is_duplicate(source_path, size_index, digest_cache):
+                skipped_count += 1
+                print(f"Skipped {filename} (already in destination)")
+                continue
+
+            if slots_used >= items_per_directory:
+                directory_count += 1
+                current_sub_dir = os.path.join(dest_dir, f"Directory_{directory_count}")
+                Path(current_sub_dir).mkdir(parents=True, exist_ok=True)
+                slots_used = 0
+
+            # Different sub-directories may hold files with the same basename;
+            # give collisions a numeric suffix so nothing is overwritten.
+            dest_path = _unique_dest_path(current_sub_dir, filename)
+            transfer(source_path, dest_path)
+        except OSError as exc:
+            failures.append((source_path, exc))
+            print(f"error: could not transfer {filename}: {exc}", file=sys.stderr)
             continue
-
-        # Start a new subdirectory every ``items_per_directory`` files
-        if file_count % items_per_directory == 0:
-            directory_count += 1
-            current_sub_dir = os.path.join(dest_dir, f"Directory_{directory_count}")
-            Path(current_sub_dir).mkdir(parents=True, exist_ok=True)
-
-        # Different sub-directories may hold files with the same basename;
-        # give collisions a numeric suffix so nothing is overwritten.
-        dest_path = _unique_dest_path(current_sub_dir, filename)
-        transfer(source_path, dest_path)
         print(f"{verb} {os.path.basename(dest_path)} to {current_sub_dir}")
 
         if copy:
             # Registered so identical files later in this same run also skip.
             size_index.setdefault(os.path.getsize(dest_path), []).append(dest_path)
 
+        slots_used += 1
         file_count += 1
 
     if skipped_count:
         print(f"Skipped {skipped_count} file(s) already present in the destination.")
+    if failures:
+        print(f"error: {len(failures)} file(s) could not be transferred.", file=sys.stderr)
 
-    return file_count
+    return OrganizeResult(file_count, failures)
