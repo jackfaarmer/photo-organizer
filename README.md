@@ -31,6 +31,23 @@ Note there is no `-e`: that copies the package into `site-packages` rather
 than linking back to this checkout, so you can move or delete the repo
 afterwards. You are responsible for the PATH step yourself — see below.
 
+### Updating an installed copy
+
+```bash
+git pull
+pipx install --force .          # or: python -m pip install --force-reinstall --no-deps .
+```
+
+`--force` matters. `pipx upgrade` and `pip install --upgrade .` compare version
+numbers and do nothing when the version is unchanged, so a same-version rebuild
+silently leaves you on the old code. `--force` rebuilds unconditionally.
+
+To install (and update) straight from GitHub without keeping a checkout:
+
+```bash
+pipx install --force git+https://github.com/jackfaarmer/photo-organizer.git
+```
+
 ### Windows: `command not found` after installing
 
 `pip` installs the launcher as `photo-organizer.exe` in your Python
@@ -132,12 +149,30 @@ source once it lands in the destination. Pass `--copy` (or `copy=True`) to
 leaving every original in place. This is the safe choice for importing an
 irreplaceable library — a wrong path or an interrupted run can't lose photos.
 
-Because the originals stay put, copy mode is **not** idempotent: re-running
-`--copy` into the same destination re-copies every source file, and the
-collision handling gives the second batch numeric suffixes (`IMG_0001_1.HEIC`,
-…) rather than skipping duplicates. Point each import at a fresh destination.
+Copy mode is **idempotent**: any source file whose content is already in the
+destination is skipped rather than copied again, so an interrupted or repeated
+import can simply be re-run, and pointing a later import at the same
+destination brings over only the genuinely new photos.
+
+Duplicates are matched by **content**, not filename — a photo you renamed in
+the destination after an earlier import is still recognized. Detection is
+cheap: the destination is indexed by file size, and a SHA-256 is computed only
+when a source file's size actually collides with something already there, so an
+import with nothing to skip never reads the destination's image data.
+
+Two consequences worth knowing:
+
+- Byte-identical files **within a single source** also collapse to one copy.
+  Real photos differ, but exact duplicates you were carrying deliberately will
+  not survive the import.
+- A re-run that brings in new photos still appends them into the existing
+  `Directory_1` rather than continuing the numbering, which can push it past
+  `items_per_directory`. Tracked in
+  [#6](https://github.com/jackfaarmer/photo-organizer/issues/6).
+
 Note also that `copy2` follows symlinks (copying the target's contents),
-whereas move relocates the link itself.
+whereas move relocates the link itself. Idempotency applies to copy mode only —
+**move mode still overwrites on collision**, also tracked in #6.
 
 > **Warning:** the default **move** mode is destructive — it removes files from
 > the source. Use `--copy` for a non-destructive import, or run against a

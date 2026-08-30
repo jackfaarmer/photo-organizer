@@ -48,7 +48,9 @@ def main(argv=None):
         help=(
             "Copy files (preserving the originals) instead of moving them. "
             "The default is to MOVE, which deletes each file from the source; "
-            "use --copy for a non-destructive import."
+            "use --copy for a non-destructive import. Copy mode skips files "
+            "whose content is already in the destination, so a repeated or "
+            "interrupted import can be re-run without duplicating photos."
         ),
     )
     args = parser.parse_args(argv)
