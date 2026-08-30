@@ -114,6 +114,21 @@ organize_photos(
 The source directory is read non-recursively by default, and the destination
 directory is created automatically if it does not already exist.
 
+### Re-running an import
+
+Numbering resumes from whatever the destination already holds. An existing
+`Directory_N` that is not yet full is topped up to `items_per_directory` before
+the next one is opened, so repeated imports keep the cap instead of piling
+everything back into `Directory_1`. Only `Directory_<number>` folders take part
+— anything else you keep alongside them is ignored.
+
+A file that cannot be transferred (locked, unreadable, a full disk) is reported
+on stderr and skipped; the run continues and the remaining files still land.
+The command exits `1` when anything failed, and the final `Done.` line counts
+only the files that actually transferred. Nothing is overwritten in either
+mode: a name collision in the destination gets a numeric suffix
+(`IMG_0001.jpg` → `IMG_0001_1.jpg`).
+
 `main.py` is kept as an editable example script — adjust the paths at the
 bottom and run `python main.py`.
 
@@ -165,14 +180,10 @@ Two consequences worth knowing:
 - Byte-identical files **within a single source** also collapse to one copy.
   Real photos differ, but exact duplicates you were carrying deliberately will
   not survive the import.
-- A re-run that brings in new photos still appends them into the existing
-  `Directory_1` rather than continuing the numbering, which can push it past
-  `items_per_directory`. Tracked in
-  [#6](https://github.com/jackfaarmer/photo-organizer/issues/6).
-
 Note also that `copy2` follows symlinks (copying the target's contents),
-whereas move relocates the link itself. Idempotency applies to copy mode only —
-**move mode still overwrites on collision**, also tracked in #6.
+whereas move relocates the link itself. Duplicate-skipping applies to copy mode
+only: a move is a request to empty the source, so move mode always transfers,
+giving any name collision a numeric suffix.
 
 > **Warning:** the default **move** mode is destructive — it removes files from
 > the source. Use `--copy` for a non-destructive import, or run against a
