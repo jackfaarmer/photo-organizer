@@ -6,22 +6,77 @@ creation time and capped at a configurable number of files per subdirectory.
 
 ## Installation
 
+### Global install (recommended)
+
+[pipx](https://pipx.pypa.io) installs the tool into its own isolated
+environment and puts the `photo-organizer` command on your PATH for you:
+
+```bash
+python -m pip install --user pipx
+python -m pipx ensurepath
+pipx install .
+```
+
+Open a new terminal afterwards (`ensurepath` only affects shells started
+after it runs). `photo-organizer` is then available from any directory, and
+this repository is no longer needed — pipx copied the package out.
+
+Plain pip works too, if you would rather not add pipx:
+
+```bash
+python -m pip install .
+```
+
+Note there is no `-e`: that copies the package into `site-packages` rather
+than linking back to this checkout, so you can move or delete the repo
+afterwards. You are responsible for the PATH step yourself — see below.
+
+### Windows: `command not found` after installing
+
+`pip` installs the launcher as `photo-organizer.exe` in your Python
+installation's **Scripts** directory, which is frequently not on PATH. pip
+prints a warning about this during install, but it is easy to miss. Locate
+the directory with:
+
+```bash
+python -c "import sysconfig; print(sysconfig.get_path('scripts'))"
+```
+
+(For a `--user` install, pass `'scripts', 'nt_user'` instead.) Add that path
+to your account's `Path` environment variable and open a new terminal.
+
+To skip PATH configuration entirely, invoke the package as a module — it is
+the same entry point and accepts identical arguments:
+
+```bash
+python -m photo_organizer <source_dir> <dest_dir>
+```
+
+If `python` and `py` point at different Python installations, install and run
+with the same one (`py -m pip install .` then `py -m photo_organizer`), or the
+launcher will land in an interpreter you are not invoking.
+
+### Editable install (for working on the code)
+
 ```bash
 python -m pip install -e .
 ```
+
+This links back to the checkout so edits take effect immediately, but it means
+the repository must stay where it is. See [Development](#development).
 
 ## Usage
 
 As a command (after installing):
 
 ```bash
-photo-organizer <source_dir> <dest_dir> [items_per_directory] [--platform mac|pc]
+photo-organizer <source_dir> <dest_dir> [items_per_directory] [--platform mac|pc] [--recursive] [--copy]
 ```
 
 As a module:
 
 ```bash
-python -m photo_organizer <source_dir> <dest_dir> [items_per_directory] [--platform mac|pc]
+python -m photo_organizer <source_dir> <dest_dir> [items_per_directory] [--platform mac|pc] [--recursive] [--copy]
 ```
 
 From Python:
@@ -34,11 +89,13 @@ organize_photos(
     dest_dir=r"D:\Photos From My Phone\iPhone 12 Reorg",
     items_per_directory=1000,
     platform="pc",  # or "mac"; omit to auto-detect the host OS.
+    recursive=False,  # set True to descend into sub-directories.
+    copy=False,  # set True to copy (preserve originals) instead of moving.
 )
 ```
 
-The source directory is read non-recursively, and the destination directory is
-created automatically if it does not already exist.
+The source directory is read non-recursively by default, and the destination
+directory is created automatically if it does not already exist.
 
 `main.py` is kept as an editable example script — adjust the paths at the
 bottom and run `python main.py`.
@@ -58,8 +115,33 @@ When `--platform` is omitted, the host OS is auto-detected (macOS → `mac`,
 everything else → `pc`). Note that on Linux `pc`'s `getctime` returns the
 inode metadata-change time, not a true creation time.
 
-> **Note:** files are **moved**, not copied. Run against a backup first if
-> you are unsure.
+### Recursive scanning (`--recursive`)
+
+By default only the top level of `source_dir` is read. Pass `--recursive` to
+walk the tree and collect files at any depth (e.g. a camera's
+`DCIM/100APPLE/…`, `DCIM/101APPLE/…` layout). Because files from different
+sub-folders can share a basename, any collision in a destination subdirectory
+is resolved by appending a numeric suffix (`IMG_0001.HEIC` →
+`IMG_0001_1.HEIC`) so nothing is clobbered.
+
+### Copy mode (`--copy`)
+
+By default files are **moved** (`shutil.move`), which deletes each one from the
+source once it lands in the destination. Pass `--copy` (or `copy=True`) to
+**copy** files instead (`shutil.copy2`, preserving timestamps and metadata),
+leaving every original in place. This is the safe choice for importing an
+irreplaceable library — a wrong path or an interrupted run can't lose photos.
+
+Because the originals stay put, copy mode is **not** idempotent: re-running
+`--copy` into the same destination re-copies every source file, and the
+collision handling gives the second batch numeric suffixes (`IMG_0001_1.HEIC`,
+…) rather than skipping duplicates. Point each import at a fresh destination.
+Note also that `copy2` follows symlinks (copying the target's contents),
+whereas move relocates the link itself.
+
+> **Warning:** the default **move** mode is destructive — it removes files from
+> the source. Use `--copy` for a non-destructive import, or run against a
+> backup first if you are unsure.
 
 ## Development
 
