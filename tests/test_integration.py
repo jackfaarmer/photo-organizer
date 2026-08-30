@@ -13,36 +13,48 @@ PER_FOLDER = 10
 EXPECTED_FOLDERS = IMAGE_COUNT // PER_FOLDER
 
 
-def _png_bytes():
-    """Return the bytes of a minimal valid 1x1 truecolor PNG."""
+def _chunk(tag, data):
+    """Return one length-tag-data-CRC PNG chunk."""
+    return (
+        struct.pack(">I", len(data))
+        + tag
+        + data
+        + struct.pack(">I", binascii.crc32(tag + data) & 0xFFFFFFFF)
+    )
 
-    def chunk(tag, data):
-        return (
-            struct.pack(">I", len(data))
-            + tag
-            + data
-            + struct.pack(">I", binascii.crc32(tag + data) & 0xFFFFFFFF)
-        )
 
+def _png_bytes(index=0):
+    """Return the bytes of a minimal valid 1x1 truecolor PNG.
+
+    ``index`` is embedded in a tEXt chunk so each generated image has distinct
+    content, the way real photos do. Copy mode matches duplicates by content,
+    so byte-identical fixtures would collapse into a single import.
+    """
     signature = b"\x89PNG\r\n\x1a\n"
     ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)  # 1x1, 8-bit, truecolor
     scanline = b"\x00\xff\x00\x00"  # filter byte 0 + one red RGB pixel
     idat = zlib.compress(scanline)
-    return signature + chunk(b"IHDR", ihdr) + chunk(b"IDAT", idat) + chunk(b"IEND", b"")
+    text = _chunk(b"tEXt", b"Comment\x00photo %d" % index)
+    return (
+        signature
+        + _chunk(b"IHDR", ihdr)
+        + text
+        + _chunk(b"IDAT", idat)
+        + _chunk(b"IEND", b"")
+    )
 
 
 def _make_images(directory, count, order=None):
     """Write ``count`` real 1x1 PNG images named ``photo_000.png`` ...
 
-    ``order`` controls the on-disk creation order (defaults to natural order).
-    Returns the sorted list of filenames created.
+    Each image holds distinct bytes. ``order`` controls the on-disk creation
+    order (defaults to natural order). Returns the sorted list of filenames.
     """
-    png = _png_bytes()
     indices = range(count) if order is None else order
     names = []
     for i in indices:
         name = f"photo_{i:03d}.png"
-        (directory / name).write_bytes(png)
+        (directory / name).write_bytes(_png_bytes(i))
         names.append(name)
     return sorted(names)
 
@@ -97,6 +109,31 @@ def test_100_images_grouped_strictly_by_date(tmp_path, monkeypatch):
         start = (n - 1) * PER_FOLDER
         expected = [f"photo_{i:03d}.png" for i in range(start, start + PER_FOLDER)]
         assert names == expected
+
+
+def test_rerunning_copy_import_does_not_duplicate(tmp_path):
+    dir_a = tmp_path / "a"
+    dir_b = tmp_path / "b"
+    dir_a.mkdir()
+    created = _make_images(dir_a, IMAGE_COUNT)
+
+    first = organize_photos(str(dir_a), str(dir_b), items_per_directory=PER_FOLDER, copy=True)
+    second = organize_photos(str(dir_a), str(dir_b), items_per_directory=PER_FOLDER, copy=True)
+
+    assert first == IMAGE_COUNT
+    # The whole library is recognized on the second pass; nothing is re-copied.
+    assert second == 0
+
+    landed = sorted(
+        name
+        for folder in os.listdir(dir_b)
+        for name in os.listdir(dir_b / folder)
+    )
+    # 100 images total, not 200 with suffixed duplicates.
+    assert len(landed) == IMAGE_COUNT
+    assert landed == created
+    # Copy mode left the source library fully intact across both runs.
+    assert sorted(os.listdir(dir_a)) == created
 
 
 def test_generated_files_are_valid_pngs(tmp_path):

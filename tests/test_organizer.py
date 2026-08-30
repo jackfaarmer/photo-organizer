@@ -1,3 +1,4 @@
+import hashlib
 import os
 
 import pytest
@@ -103,6 +104,201 @@ def test_copy_mode_retains_timestamps(tmp_path):
     copied = dest / "Directory_1" / path.name
     # copy2 preserves the original modification time.
     assert os.stat(copied).st_mtime == expected_mtime
+
+
+def test_copy_mode_is_idempotent_on_rerun(tmp_path):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    source.mkdir()
+    originals = _make_files(source, 5)
+
+    first = organize_photos(str(source), str(dest), items_per_directory=1000, copy=True)
+    second = organize_photos(str(source), str(dest), items_per_directory=1000, copy=True)
+
+    assert first == 5
+    # Every file is recognized as already imported, so nothing is copied again.
+    assert second == 0
+    assert len(os.listdir(dest / "Directory_1")) == 5
+    # No suffixed duplicates (IMG_0001_1.jpg) were created.
+    assert sorted(os.listdir(dest / "Directory_1")) == sorted(p.name for p in originals)
+    assert sorted(os.listdir(source)) == sorted(p.name for p in originals)
+
+
+def test_copy_mode_rerun_imports_only_new_files(tmp_path):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    source.mkdir()
+    _make_files(source, 5)
+
+    organize_photos(str(source), str(dest), items_per_directory=1000, copy=True)
+
+    # Two genuinely new photos arrive in the source after the first import.
+    for i in (5, 6):
+        path = source / f"photo_{i:03d}.jpg"
+        path.write_text(f"content {i}")
+        ts = 1_600_000_000 + i * 60
+        os.utime(path, (ts, ts))
+
+    copied = organize_photos(str(source), str(dest), items_per_directory=1000, copy=True)
+
+    assert copied == 2
+    landed = [name for folder in os.listdir(dest) for name in os.listdir(dest / folder)]
+    assert len(landed) == 7
+
+
+def test_copy_mode_recognizes_renamed_destination_file(tmp_path):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    source.mkdir()
+    _make_files(source, 1)
+
+    organize_photos(str(source), str(dest), copy=True)
+    # Duplicates are matched on content, not filename, so renaming the imported
+    # copy must not cause the source file to be imported a second time.
+    (dest / "Directory_1" / "photo_000.jpg").rename(dest / "Directory_1" / "vacation.jpg")
+
+    copied = organize_photos(str(source), str(dest), copy=True)
+
+    assert copied == 0
+    assert os.listdir(dest / "Directory_1") == ["vacation.jpg"]
+
+
+def test_copy_mode_imports_same_size_files_with_different_content(tmp_path):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    source.mkdir()
+    # Identical sizes, different bytes: size alone must not declare a duplicate.
+    (source / "a.jpg").write_text("AAAA")
+    (source / "b.jpg").write_text("BBBB")
+
+    copied = organize_photos(str(source), str(dest), copy=True)
+
+    assert copied == 2
+    assert sorted(os.listdir(dest / "Directory_1")) == ["a.jpg", "b.jpg"]
+
+
+def test_copy_mode_collapses_duplicates_within_one_run(tmp_path):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    source.mkdir()
+    # The same photo sitting in the source twice under different names.
+    (source / "IMG_0001.jpg").write_text("same bytes")
+    (source / "IMG_0001_copy.jpg").write_text("same bytes")
+
+    copied = organize_photos(str(source), str(dest), copy=True)
+
+    # Newly copied files join the index, so the second identical file is skipped.
+    assert copied == 1
+    assert len(os.listdir(dest / "Directory_1")) == 1
+
+
+def test_copy_mode_reports_skipped_count(tmp_path, capsys):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    source.mkdir()
+    _make_files(source, 3)
+
+    organize_photos(str(source), str(dest), copy=True)
+    capsys.readouterr()  # discard the first run's output
+    organize_photos(str(source), str(dest), copy=True)
+
+    out = capsys.readouterr().out
+    assert "already in destination" in out
+    assert "Skipped 3 file(s) already present in the destination." in out
+
+
+def test_copy_mode_does_not_hash_when_no_size_matches(tmp_path, monkeypatch):
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    source.mkdir()
+    # Distinct sizes throughout, so the size pre-filter alone settles every file.
+    for i in range(4):
+        (source / f"photo_{i}.jpg").write_text("x" * (i + 1))
+
+    def boom(path):
+        raise AssertionError(f"hashed {path} despite no size collision")
+
+    monkeypatch.setattr(organizer, "_file_digest", boom)
+
+    assert organize_photos(str(source), str(dest), copy=True) == 4
+
+
+def test_move_mode_rerun_behavior_is_unchanged(tmp_path):
+    """Pin move mode's current (unfixed) re-run behavior; see issue #6."""
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    source.mkdir()
+    _make_files(source, 2)
+
+    organize_photos(str(source), str(dest), items_per_directory=1000)
+    # Re-create the same files and move them again into the populated dest.
+    _make_files(source, 2)
+    moved = organize_photos(str(source), str(dest), items_per_directory=1000)
+
+    # Move mode does NOT skip duplicates: both files transfer again and are
+    # suffixed rather than recognized. Idempotency is copy-mode only for now.
+    assert moved == 2
+    assert len(os.listdir(dest / "Directory_1")) == 4
+
+
+def test_index_dest_by_size_groups_paths_by_size(tmp_path):
+    (tmp_path / "a.jpg").write_text("xx")
+    (tmp_path / "b.jpg").write_text("yy")
+    (tmp_path / "c.jpg").write_text("zzz")
+
+    index = organizer._index_dest_by_size(str(tmp_path))
+
+    assert sorted(index) == [2, 3]
+    assert sorted(os.path.basename(p) for p in index[2]) == ["a.jpg", "b.jpg"]
+    assert [os.path.basename(p) for p in index[3]] == ["c.jpg"]
+
+
+def test_index_dest_by_size_walks_nested_directories(tmp_path):
+    (tmp_path / "Directory_1").mkdir()
+    (tmp_path / "Directory_1" / "a.jpg").write_text("xx")
+
+    index = organizer._index_dest_by_size(str(tmp_path))
+
+    assert [os.path.basename(p) for p in index[2]] == ["a.jpg"]
+
+
+def test_index_dest_by_size_ignores_temp_files(tmp_path):
+    # A crashed run's leftover fragment must never mask a real photo.
+    (tmp_path / f"{organizer._TMP_PREFIX}abc123").write_text("partial")
+
+    assert organizer._index_dest_by_size(str(tmp_path)) == {}
+
+
+def test_index_dest_by_size_of_empty_destination(tmp_path):
+    assert organizer._index_dest_by_size(str(tmp_path)) == {}
+
+
+def test_file_digest_matches_hashlib(tmp_path):
+    path = tmp_path / "photo.jpg"
+    path.write_bytes(b"some image bytes")
+
+    assert organizer._file_digest(str(path)) == hashlib.sha256(b"some image bytes").hexdigest()
+
+
+def test_file_digest_streams_large_files(tmp_path):
+    # Spans several read chunks, exercising the streaming loop.
+    payload = b"z" * (organizer._DIGEST_CHUNK_SIZE * 2 + 7)
+    path = tmp_path / "big.jpg"
+    path.write_bytes(payload)
+
+    assert organizer._file_digest(str(path)) == hashlib.sha256(payload).hexdigest()
+
+
+def test_is_duplicate_skips_hashing_on_size_miss(tmp_path, monkeypatch):
+    path = tmp_path / "photo.jpg"
+    path.write_text("abc")
+
+    def boom(_path):
+        raise AssertionError("hashed despite a size miss")
+
+    monkeypatch.setattr(organizer, "_file_digest", boom)
+
+    assert organizer._is_duplicate(str(path), {99: ["/nonexistent"]}, {}) is False
 
 
 def test_splits_across_directories(tmp_path):
