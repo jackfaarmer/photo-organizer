@@ -574,7 +574,7 @@ def test_recursive_skips_broken_symlinks(tmp_path):
     assert len(os.listdir(dest / "Directory_1")) == 2
 
 
-def test_recursive_dedupes_colliding_basenames(tmp_path):
+def test_recursive_dedupes_colliding_basenames(tmp_path, monkeypatch):
     source = tmp_path / "src"
     dest = tmp_path / "dst"
     (source / "100APPLE").mkdir(parents=True)
@@ -583,9 +583,11 @@ def test_recursive_dedupes_colliding_basenames(tmp_path):
     second = source / "101APPLE" / "IMG_0001.jpg"
     first.write_text("from 100APPLE")
     second.write_text("from 101APPLE")
-    # Stagger timestamps so ordering is deterministic (first moved first).
+    # This test exercises collision handling. On Linux, os.utime changes mtime
+    # but not creation time, so use the staged mtime for deterministic ordering.
     os.utime(first, (1_600_000_000, 1_600_000_000))
     os.utime(second, (1_600_000_060, 1_600_000_060))
+    monkeypatch.setattr(organizer, "_creation_time", lambda path, platform: os.path.getmtime(path))
 
     moved = organize_photos(str(source), str(dest), items_per_directory=1000, recursive=True)
 
@@ -593,7 +595,7 @@ def test_recursive_dedupes_colliding_basenames(tmp_path):
     directory = dest / "Directory_1"
     # Both files survive as two distinct files; nothing is clobbered.
     assert sorted(os.listdir(directory)) == ["IMG_0001.jpg", "IMG_0001_1.jpg"]
-    # Ordering is deterministic: the earlier-ctime file keeps the bare name, the
+    # Ordering is deterministic: the earlier file keeps the bare name, the
     # later one gets the numeric suffix.
     assert (directory / "IMG_0001.jpg").read_text() == "from 100APPLE"
     assert (directory / "IMG_0001_1.jpg").read_text() == "from 101APPLE"
