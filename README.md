@@ -35,7 +35,8 @@ afterwards. You are responsible for the PATH step yourself — see below.
 
 ```bash
 git pull
-pipx install --force .          # or: python -m pip install --force-reinstall --no-deps .
+pipx install --force .             # standard installation
+pipx install --force '.[iphone]'    # use this instead for direct iPhone import
 ```
 
 `--force` matters. `pipx upgrade` and `pip install --upgrade .` compare version
@@ -90,9 +91,13 @@ Install the optional device dependency, connect and unlock the iPhone, and tap
 **Trust** if prompted:
 
 ```bash
-python -m pip install '.[iphone]'
+pipx install --force '.[iphone]'   # from this checkout; includes pymobiledevice3
 photo-organizer iphone /path/to/destination
 ```
+
+For a plain pip installation, use `python -m pip install '.[iphone]'` instead.
+The standard `pipx install .` installs the directory-only tool without this
+optional dependency.
 
 This copies files from the phone's `/DCIM` media directory into the same
 `Directory_N` layout as the directory command. It never moves or deletes files
