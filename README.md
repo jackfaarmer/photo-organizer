@@ -35,7 +35,8 @@ afterwards. You are responsible for the PATH step yourself — see below.
 
 ```bash
 git pull
-pipx install --force .          # or: python -m pip install --force-reinstall --no-deps .
+pipx install --force .             # standard installation
+pipx install --force '.[iphone]'    # use this instead for direct iPhone import
 ```
 
 `--force` matters. `pipx upgrade` and `pip install --upgrade .` compare version
@@ -83,6 +84,40 @@ This links back to the checkout so edits take effect immediately, but it means
 the repository must stay where it is. See [Development](#development).
 
 ## Usage
+
+### Import directly from an iPhone
+
+Install the optional device dependency, connect and unlock the iPhone, and tap
+**Trust** if prompted:
+
+```bash
+pipx install --force '.[iphone]'   # from this checkout; includes pymobiledevice3
+photo-organizer iphone /path/to/destination
+```
+
+For a plain pip installation, use `python -m pip install '.[iphone]'` instead.
+The standard `pipx install .` installs the directory-only tool without this
+optional dependency.
+
+This copies files from the phone's `/DCIM` media directory into the same
+`Directory_N` layout as the directory command. It never moves or deletes files
+on the phone. It sorts by the device's file creation timestamp, falling back to
+modification time; this is not yet EXIF capture-date sorting. It preserves
+modification timestamps, skips content duplicates on rerun, and publishes each
+local file only after a complete transfer. `--items-per-directory N` changes
+the folder cap, `--device UDID` selects a specific connected phone, and
+`--max-files N` limits the number of successful copies for a trial run.
+
+From Python, use `organize_iphone_photos(destination)` or its async counterpart
+`organize_iphone_photos_async(destination)`; neither requires the optional
+dependency until called. On Windows, install Apple Mobile Device Support. On
+Linux, install and run `usbmuxd`. Full-size media stored only in iCloud is not
+available through the phone's local `/DCIM` directory.
+
+The core photo-organizer code remains MIT licensed. The optional
+`pymobiledevice3` dependency is GPL-3.0-or-later; distributing a combined
+application that imports it must comply with its GPL terms. The MIT license on
+the core code does not remove those terms for the combined application.
 
 As a command (after installing):
 

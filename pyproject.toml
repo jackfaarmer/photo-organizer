@@ -14,6 +14,7 @@ keywords = ["photos", "organize", "files"]
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "ruff>=0.4"]
+iphone = ["pymobiledevice3>=11.19.4,<12"]
 
 [project.scripts]
 photo-organizer = "photo_organizer.__main__:main"
