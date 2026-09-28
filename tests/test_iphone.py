@@ -12,6 +12,8 @@ class FakeAfc:
         self.handles = {}
         self.next_handle = 1
         self.fail_path = None
+        self.fail_stat = None
+        self.advertised_size = {}
 
     async def listdir(self, path):
         if path == "/DCIM":
@@ -19,10 +21,16 @@ class FakeAfc:
         return [p.rsplit("/", 1)[1] for p in self.files if p.rsplit("/", 1)[0] == path]
 
     async def stat(self, path):
+        if path == self.fail_stat:
+            raise OSError("simulated unreadable item")
         if path in ("/DCIM/100APPLE", "/DCIM/101APPLE"):
             return {"st_ifmt": "S_IFDIR"}
         data, timestamp = self.files[path]
-        return {"st_ifmt": "S_IFREG", "st_size": len(data), "st_birthtime": timestamp}
+        return {
+            "st_ifmt": "S_IFREG",
+            "st_size": self.advertised_size.get(path, len(data)),
+            "st_birthtime": timestamp,
+        }
 
     async def fopen(self, path, mode):
         assert mode == "r"
@@ -79,3 +87,24 @@ def test_iphone_failed_read_leaves_no_partial_photo(tmp_path):
     assert list(tmp_path.rglob("IMG_1.JPG")) == []
     assert not any(p.name.startswith(".photo-organizer-tmp-") for p in tmp_path.rglob("*"))
     assert not afc.handles
+
+
+def test_iphone_incomplete_read_and_unreadable_item_are_reported(tmp_path):
+    stamp = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    afc = FakeAfc(
+        {
+            "/DCIM/100APPLE/IMG_1.JPG": (b"first", stamp),
+            "/DCIM/100APPLE/IMG_2.JPG": (b"second", stamp),
+            "/DCIM/100APPLE/IMG_3.JPG": (b"third", stamp),
+        }
+    )
+    afc.advertised_size["/DCIM/100APPLE/IMG_1.JPG"] = 100
+    afc.fail_stat = "/DCIM/100APPLE/IMG_2.JPG"
+
+    result = asyncio.run(_organize_from_afc(afc, str(tmp_path), 1))
+
+    assert result == 1
+    assert len(result.failures) == 2
+    assert (tmp_path / "Directory_1" / "IMG_3.JPG").read_bytes() == b"third"
+    assert list(tmp_path.rglob("IMG_1.JPG")) == []
+    assert not any(p.name.startswith(".photo-organizer-tmp-") for p in tmp_path.rglob("*"))

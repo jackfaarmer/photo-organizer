@@ -5,11 +5,30 @@ import os
 import pytest
 
 from photo_organizer.__main__ import main
+from photo_organizer.organizer import OrganizeResult
 
 
 def _make_files(directory, count):
     for i in range(count):
         (directory / f"photo_{i}.jpg").write_text(f"content {i}")
+
+
+def test_iphone_command_passes_options_through(tmp_path, monkeypatch, capsys):
+    from photo_organizer import iphone
+
+    received = {}
+
+    def fake_import(dest, items_per_directory, device, max_files):
+        received.update(dest=dest, cap=items_per_directory, device=device, limit=max_files)
+        return OrganizeResult(1)
+
+    monkeypatch.setattr(iphone, "organize_iphone_photos", fake_import)
+
+    rc = main(["iphone", str(tmp_path), "--items-per-directory", "5", "--max-files", "1"])
+
+    assert rc == 0
+    assert received == {"dest": str(tmp_path), "cap": 5, "device": None, "limit": 1}
+    assert "Copied 1 file(s) from iPhone" in capsys.readouterr().out
 
 
 def test_main_organizes_files(tmp_path, capsys):

@@ -27,21 +27,36 @@ def _safe_name(name):
 async def _collect_files(afc, directory="/DCIM"):
     """List regular media files with their size and device timestamps."""
     files = []
+    failures = []
     pending = [directory]
     while pending:
         parent = pending.pop()
-        for name in await afc.listdir(parent):
+        try:
+            names = await afc.listdir(parent)
+        except Exception as exc:
+            if parent == directory:
+                raise
+            failures.append((parent, exc))
+            continue
+        for name in names:
             if not _safe_name(name) or name.startswith("._") or name == ".DS_Store":
                 continue
             path = posixpath.join(parent, name)
-            info = await afc.stat(path)
+            try:
+                info = await afc.stat(path)
+            except Exception as exc:  # noqa: BLE001 - report and continue with other media.
+                failures.append((path, exc))
+                continue
             if info.get("st_ifmt") == "S_IFDIR":
                 pending.append(path)
             elif info.get("st_ifmt") == "S_IFREG":
-                stamp = info.get("st_birthtime") or info.get("st_mtime")
-                files.append((path, info["st_size"], stamp.timestamp()))
+                try:
+                    stamp = info.get("st_birthtime") or info["st_mtime"]
+                    files.append((path, info["st_size"], stamp.timestamp()))
+                except (KeyError, TypeError, AttributeError) as exc:
+                    failures.append((path, exc))
     files.sort(key=lambda item: (item[2], item[0]))
-    return files
+    return files, failures
 
 
 async def _remote_digest(afc, path):
@@ -108,14 +123,15 @@ async def _organize_from_afc(afc, dest_dir, items_per_directory, max_files=None)
     if max_files is not None and max_files < 1:
         raise ValueError("max_files must be at least 1")
 
-    files = await _collect_files(afc)
+    files, failures = await _collect_files(afc)
     Path(dest_dir).mkdir(parents=True, exist_ok=True)
     size_index = _index_dest_by_size(dest_dir)
     digest_cache = {}
     directory_count, slots_used = _resume_point(dest_dir, items_per_directory)
     current_dir = os.path.join(dest_dir, f"Directory_{directory_count}")
     copied = skipped = 0
-    failures = []
+    for path, exc in failures:
+        print(f"error: could not inspect {path}: {exc}", file=sys.stderr)
 
     for source, size, timestamp in files:
         name = posixpath.basename(source)
