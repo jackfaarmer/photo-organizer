@@ -4,14 +4,39 @@ import sys
 from .organizer import PLATFORMS, organize_photos
 
 
+def _iphone_main(argv):
+    from .iphone import organize_iphone_photos
+
+    parser = argparse.ArgumentParser(
+        prog="photo-organizer iphone",
+        description="Copy photos directly from a connected iPhone (never deletes from the phone).",
+    )
+    parser.add_argument("dest_dir", help="Directory to create numbered subdirectories in.")
+    parser.add_argument(
+        "--items-per-directory", type=int, default=1000, help="Files per directory (default: 1000)."
+    )
+    parser.add_argument("--device", help="Device UDID when more than one iPhone is connected.")
+    parser.add_argument("--max-files", type=int, help="Stop after copying this many files.")
+    args = parser.parse_args(argv)
+    try:
+        result = organize_iphone_photos(
+            args.dest_dir, args.items_per_directory, device=args.device, max_files=args.max_files
+        )
+    except Exception as exc:  # noqa: BLE001 - report connection errors without a traceback.
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(f"Done. Copied {result} file(s) from iPhone.")
+    return 1 if result.failures else 0
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "iphone":
+        return _iphone_main(argv[1:])
 
     parser = argparse.ArgumentParser(
         prog="photo-organizer",
-        description=(
-            "Sort a directory of photos into numbered subdirectories by creation date."
-        ),
+        description=("Sort a directory of photos into numbered subdirectories by creation date."),
     )
     parser.add_argument(
         "source_dir", help="Directory to read files from (top-level only by default)."
